@@ -1,4 +1,5 @@
 #! /bin/bash
+set -euo pipefail
 # Copyright (c) 2018 flyzy小站
 
 red='\033[0;31m'
@@ -21,7 +22,7 @@ usage () {
         cat $fly_dir/sshelp
 }
 
-DIR=`pwd`
+DIR=$(pwd)
 
 wrong_para_prompt() {
     echo -e "[${red}错误${plain}] 参数输入错误!$1"
@@ -458,10 +459,17 @@ cleanup() {
 }
 
 get_ip(){
-    local IP=$( ip addr | egrep -o '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | egrep -v "^192\.168|^172\.1[6-9]\.|^172\.2[0-9]\.|^172\.3[0-2]\.|^10\.|^127\.|^255\.|^0\." | head -n 1 )
-    [ -z ${IP} ] && IP=$( wget -qO- -t1 -T2 ipv4.icanhazip.com )
-    [ -z ${IP} ] && IP=$( wget -qO- -t1 -T2 ipinfo.io/ip )
-    [ ! -z ${IP} ] && echo ${IP} || echo
+    local ip
+    ip=$( ip addr | egrep -o '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | \
+         egrep -v "^192\.168|^172\.1[6-9]\.|^172\.2[0-9]\.|^172\.3[0-2]\.|^10\.|^127\.|^255\.|^0\." | \
+         head -n 1 )
+    if [ -z "$ip" ]; then
+        ip=$( wget -qO- -t1 -T2 ipv4.icanhazip.com )
+    fi
+    if [ -z "$ip" ]; then
+        ip=$( wget -qO- -t1 -T2 ipinfo.io/ip )
+    fi
+    [ -n "$ip" ] && echo "$ip" || echo
 }
 
 get_ss_link(){
