@@ -1,5 +1,5 @@
 #! /bin/bash
-set -euo pipefail
+
 # Copyright (c) 2018 flyzy小站
 
 red='\033[0;31m'
