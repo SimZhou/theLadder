@@ -4,6 +4,7 @@ install_xray() {
   require_root
   ensure_layout
   ensure_base_tools
+  ensure_bbr
   detect_arch
 
   local port="${1:-443}"

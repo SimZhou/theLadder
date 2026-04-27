@@ -94,6 +94,30 @@ ensure_base_tools() {
   fi
 }
 
+ensure_bbr() {
+  local sysctl_file="/etc/sysctl.d/99-theladder-bbr.conf"
+  local congestion_control default_qdisc
+
+  cat >"${sysctl_file}" <<EOF
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+EOF
+
+  sysctl --system >/dev/null || {
+    log_warn "Failed to apply BBR sysctl settings. Continue installation without TCP BBR."
+    return
+  }
+
+  congestion_control="$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || true)"
+  default_qdisc="$(sysctl -n net.core.default_qdisc 2>/dev/null || true)"
+
+  if [[ "${congestion_control}" == "bbr" && "${default_qdisc}" == "fq" ]]; then
+    log_info "Linux TCP BBR enabled."
+  else
+    log_warn "Linux TCP BBR is not active. Current: tcp_congestion_control=${congestion_control:-unknown}, default_qdisc=${default_qdisc:-unknown}"
+  fi
+}
+
 detect_arch() {
   case "$(uname -m)" in
     x86_64|amd64)

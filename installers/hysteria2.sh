@@ -4,6 +4,7 @@ install_hysteria2() {
   require_root
   ensure_layout
   ensure_base_tools
+  ensure_bbr
   detect_arch
 
   local port="${1:-443}"
@@ -45,6 +46,10 @@ auth:
   type: password
   password: ${password}
 
+congestion:
+  type: bbr
+  bbrProfile: standard
+
 obfs:
   type: salamander
   salamander:
@@ -67,6 +72,10 @@ EOF
   cat >"${CONFIG_ROOT}/hysteria2-client.yaml" <<EOF
 server: ${server_ip}:${port}
 auth: ${password}
+
+congestion:
+  type: bbr
+  bbrProfile: standard
 
 tls:
   sni: bing.com
