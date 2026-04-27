@@ -210,6 +210,7 @@ restart_service() {
   local service_name="$1"
   systemctl restart "${service_name}"
   systemctl --no-pager --full status "${service_name}" || true
+  systemctl is-active --quiet "${service_name}" || die "Service ${service_name} is not active after restart."
 }
 
 stop_disable_service() {
