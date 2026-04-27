@@ -9,6 +9,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${SCRIPT_DIR}/installers/xray.sh"
 # shellcheck source=installers/hysteria2.sh
 . "${SCRIPT_DIR}/installers/hysteria2.sh"
+# shellcheck source=installers/legacy.sh
+. "${SCRIPT_DIR}/installers/legacy.sh"
 
 usage() {
   cat <<'EOF'
@@ -25,10 +27,8 @@ Modern protocols:
   ./ladder.sh show xray|hysteria2|best
 
 Legacy compatibility:
-  ./ladder.sh legacy ss <password> [port]
-  ./ladder.sh legacy ssr
-  ./ladder.sh legacy sslink
-  ./ladder.sh legacy bbr
+  ./ladder.sh legacy status
+  ./ladder.sh legacy purge
 
 Defaults:
   xray_port: 443/tcp
@@ -73,23 +73,10 @@ show_best() {
 
 legacy_command() {
   local legacy_action="${1:-}"
-  shift || true
 
   case "${legacy_action}" in
-    ss)
-      log_warn "SS is legacy and may fail on modern systems without Python 2. Prefer: ./ladder.sh install xray"
-      "${SCRIPT_DIR}/ss-fly.sh" -i "$@"
-      ;;
-    ssr)
-      log_warn "SSR is legacy and depends on an external installer. Prefer: ./ladder.sh install xray"
-      "${SCRIPT_DIR}/ss-fly.sh" -ssr
-      ;;
-    sslink)
-      "${SCRIPT_DIR}/ss-fly.sh" -sslink
-      ;;
-    bbr)
-      "${SCRIPT_DIR}/ss-fly.sh" -bbr
-      ;;
+    status) status_legacy ;;
+    purge) purge_legacy ;;
     *)
       usage
       exit 1

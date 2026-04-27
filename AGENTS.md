@@ -19,10 +19,10 @@ This repository maintains Linux proxy deployment scripts. Keep the design simple
 
 ## Compatibility Direction
 
-- SS/SSR remain available only for compatibility and migration. They should not block modern installs if Python 2 or old package names are unavailable.
+- SS/SSR installers are no longer maintained in this repository. Keep only status and purge helpers for removing existing legacy deployments.
 - Do not remove or stop existing SS/SSR services as part of a modern install unless the user explicitly asks. Modern services must be able to run in parallel on separate ports during migration.
 - New development should prioritize Xray-core first, then Hysteria2.
-- The CLI should make the recommended path obvious while still exposing legacy commands for users who need them.
+- The CLI should make the recommended path obvious while exposing only necessary legacy cleanup commands.
 
 ## Verified Defaults
 

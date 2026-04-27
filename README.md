@@ -93,14 +93,18 @@ Hysteria2: 8443/udp
 
 如果机器有云平台安全组，需要在云平台控制台放行对应端口。
 
-## 旧组件
+## 旧组件清理
 
-旧组件仅作为迁移期兼容使用：
+检查旧组件：
 
 ```bash
-sudo ./ladder.sh legacy ss <password> [port]
-sudo ./ladder.sh legacy ssr
-sudo ./ladder.sh legacy bbr
+sudo ./ladder.sh legacy status
 ```
 
-新组件可以和旧组件并行运行，只要端口不冲突。
+确认不再需要后清理：
+
+```bash
+sudo ./ladder.sh legacy purge
+```
+
+清理前会备份相关文件到 `/root/backup-theLadder-legacy-*`。
