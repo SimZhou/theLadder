@@ -33,8 +33,10 @@ install_xray() {
 
   uuid="$(random_uuid)"
   key_output="$("${BIN_ROOT}/xray" x25519)"
-  private_key="$(echo "${key_output}" | awk -F': ' '/Private key/ {print $2}')"
-  public_key="$(echo "${key_output}" | awk -F': ' '/Public key/ {print $2}')"
+  private_key="$(parse_xray_key "${key_output}" "private")"
+  public_key="$(parse_xray_key "${key_output}" "public")"
+  [[ -n "${private_key}" ]] || die "Failed to parse Xray REALITY private key from: xray x25519"
+  [[ -n "${public_key}" ]] || die "Failed to parse Xray REALITY public key from: xray x25519"
   short_id="$(random_hex 8)"
 
   cat >"${CONFIG_ROOT}/xray.json" <<EOF
@@ -121,6 +123,27 @@ EOF
   log_info "Xray installed: ${tag}"
   echo
   cat "${CONFIG_ROOT}/xray-client.txt"
+}
+
+parse_xray_key() {
+  local output="$1"
+  local kind="$2"
+
+  printf '%s\n' "${output}" | awk -v kind="${kind}" '
+    {
+      line = $0
+      lower = tolower(line)
+      compact = lower
+      gsub(/[ _-]/, "", compact)
+      target = kind "key"
+      if (compact ~ target) {
+        sub(/^[^:]*:[[:space:]]*/, "", line)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+        print line
+        exit
+      }
+    }
+  '
 }
 
 uninstall_xray() {
