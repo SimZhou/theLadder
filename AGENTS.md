@@ -20,8 +20,22 @@ This repository maintains Linux proxy deployment scripts. Keep the design simple
 ## Compatibility Direction
 
 - SS/SSR remain available only for compatibility and migration. They should not block modern installs if Python 2 or old package names are unavailable.
+- Do not remove or stop existing SS/SSR services as part of a modern install unless the user explicitly asks. Modern services must be able to run in parallel on separate ports during migration.
 - New development should prioritize Xray-core first, then Hysteria2.
 - The CLI should make the recommended path obvious while still exposing legacy commands for users who need them.
+
+## Verified Defaults
+
+- Xray installs should generate `VLESS + REALITY + XTLS Vision` on TCP `443` by default, with `servername`/`dest` defaulting to `www.microsoft.com`.
+- Hysteria2 installs should be treated as a high-throughput fallback and should support a configurable UDP port. Use UDP `8443` in examples when Xray already uses TCP `443`.
+- Generated client output must include enough fields for mihomo clients: server, port, uuid/password, `flow`, `servername`/SNI, public key, short id, and obfs settings where applicable.
+- Never write private server keys, generated passwords, or real node credentials into repository docs or examples. Use placeholders in committed documentation.
+
+## Operational Checks
+
+- After writing a systemd unit, verify the service is actually active after restart. A transient successful `systemctl restart` is not enough.
+- Xray REALITY key parsing must tolerate upstream output formatting differences from `xray x25519`; fail fast if either private or public key is empty.
+- Firewall helpers should warn when no local firewall manager is active, but cloud security groups still need to be opened manually.
 
 ## Code Style
 
