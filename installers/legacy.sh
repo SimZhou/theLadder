@@ -51,8 +51,11 @@ purge_legacy() {
 backup_path() {
   local src="$1"
   local backup_dir="$2"
+  local dst="${backup_dir}${src}"
+
   if [[ -e "${src}" ]]; then
-    cp -a "${src}" "${backup_dir}/"
+    mkdir -p "$(dirname "${dst}")"
+    cp -a "${src}" "${dst}"
   fi
 }
 
