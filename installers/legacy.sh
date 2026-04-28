@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 legacy_patterns='ssr|shadowsocks|ssserver|server.py|shadowsocksr'
+legacy_unit_pattern='^(ssr|shadowsocks|shadowsocksr|ssserver|ss-server|ss-fly)(@|\.service|[[:space:]])'
 
 purge_legacy() {
   require_root
@@ -102,5 +103,5 @@ status_legacy() {
     2>/dev/null || true
   echo
   echo "Systemd units:"
-  systemctl list-unit-files 2>/dev/null | grep -Ei 'ssr|shadowsocks|ss-server|shadowsocksr|ss-fly' || true
+  systemctl list-unit-files 2>/dev/null | grep -Ei "${legacy_unit_pattern}" || true
 }
