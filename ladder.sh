@@ -14,33 +14,65 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
   cat <<'EOF'
-theLadder - simple Linux proxy deployment
+theLadder - Linux 代理服务一键部署脚本
 
-Recommended:
+新手推荐：
+  直接安装推荐组合。它会同时安装：
+  1. Xray VLESS + REALITY + XTLS Vision：默认 TCP 443，兼容性好，建议作为主力节点。
+  2. Hysteria2：默认 UDP 443，适合 UDP 可用、网络波动较大或需要高吞吐的场景。
+
+  sudo ./ladder.sh install best
+
+安装完成后查看客户端配置：
+  sudo ./ladder.sh show best
+
+  show 输出会包含两类内容：
+  1. 原始客户端信息，适合手动填写客户端。
+  2. mihomo 的 proxies 配置片段，适合复制到 Clash Verge Rev、FlClash 等 mihomo 客户端。
+
+推荐安装：
   ./ladder.sh install best [xray_port] [hysteria2_port] [reality_sni]
 
-Modern protocols:
+单独安装现代协议：
   ./ladder.sh install xray [port] [reality_sni] [reality_dest]
   ./ladder.sh install hysteria2 [udp_port]
-  ./ladder.sh uninstall xray|hysteria2|best
-  ./ladder.sh status xray|hysteria2|best
+
+查看配置：
   ./ladder.sh show xray|hysteria2|best
 
-Legacy compatibility:
+查看运行状态：
+  ./ladder.sh status xray|hysteria2|best
+
+卸载：
+  ./ladder.sh uninstall xray|hysteria2|best
+
+旧版 Shadowsocks/SSR 清理：
   ./ladder.sh legacy status
   ./ladder.sh legacy purge
 
-Defaults:
-  xray_port: 443/tcp
-  hysteria2_port: 443/udp
-  reality_sni: www.microsoft.com
+默认值：
+  Xray 端口：443/tcp
+  Hysteria2 端口：443/udp
+  REALITY SNI：www.microsoft.com
+
+协议选择建议：
+  优先使用 Xray VLESS REALITY Vision，通常最稳。
+  Hysteria2 作为备用或高吞吐节点，需要服务器和本地网络都放行 UDP 端口。
+  不确定怎么选时，用 install best，并在客户端里同时保留两个节点。
+
+客户端建议：
+  iOS：优先 Stash 或 Shadowrocket；如果要免费手动填 VLESS/Hysteria2，可试 V2Box。
+  macOS：推荐 Clash Verge Rev；也可以用 Clash Party/Mihomo Party。
+  Android：推荐 FlClash 或 Clash Meta for Android；进阶用户可用 NekoBox。
+  Linux 桌面：推荐 Clash Verge Rev；无桌面服务器可直接运行 mihomo core。
+  Windows：推荐 Clash Verge Rev；也可以用 FlClash 或 Clash Party。
 EOF
 }
 
 validate_port() {
   local port="$1"
-  [[ "${port}" =~ ^[0-9]+$ ]] || die "Invalid port: ${port}"
-  ((port >= 1 && port <= 65535)) || die "Invalid port: ${port}"
+  [[ "${port}" =~ ^[0-9]+$ ]] || die "端口不合法：${port}"
+  ((port >= 1 && port <= 65535)) || die "端口不合法：${port}"
 }
 
 install_best() {
