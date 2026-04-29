@@ -177,6 +177,39 @@ random_password() {
   openssl rand -base64 24 | tr -d '\n'
 }
 
+quote_yaml_string() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf '"%s"' "${value}"
+}
+
+config_value() {
+  local file="$1"
+  local key="$2"
+
+  awk -v key="${key}" '
+    index($0, key ":") == 1 {
+      sub("^[^:]*:[[:space:]]*", "")
+      print
+      exit
+    }
+  ' "${file}"
+}
+
+indented_config_value() {
+  local file="$1"
+  local key="$2"
+
+  awk -v key="${key}" '
+    $0 ~ "^[[:space:]]+" key ":" {
+      sub("^[^:]*:[[:space:]]*", "")
+      print
+      exit
+    }
+  ' "${file}"
+}
+
 public_ip() {
   local ip=""
   ip="$(curl -fsS --max-time 3 https://api.ipify.org 2>/dev/null || true)"

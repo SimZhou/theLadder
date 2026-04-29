@@ -66,9 +66,14 @@ status_best() {
 }
 
 show_best() {
-  show_xray
+  show_xray_client_info
   echo
-  show_hysteria2
+  show_hysteria2_client_info
+  echo
+  echo "Mihomo proxies:"
+  echo "proxies:"
+  print_xray_mihomo_proxy
+  print_hysteria2_mihomo_proxy
 }
 
 legacy_command() {

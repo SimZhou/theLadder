@@ -45,6 +45,8 @@ sudo ./ladder.sh show hysteria2
 sudo ./ladder.sh show best
 ```
 
+`show` 输出会附带可直接用于 mihomo 的 `proxies` 配置片段。
+
 ## 查看状态
 
 ```bash

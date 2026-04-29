@@ -159,9 +159,53 @@ status_xray() {
 }
 
 show_xray() {
+  show_xray_client_info
+  echo
+  echo "Mihomo proxies:"
+  echo "proxies:"
+  print_xray_mihomo_proxy
+}
+
+show_xray_client_info() {
   if [[ -f "${CONFIG_ROOT}/xray-client.txt" ]]; then
     cat "${CONFIG_ROOT}/xray-client.txt"
   else
     die "Xray client info not found. Run: $0 install xray"
   fi
+}
+
+print_xray_mihomo_proxy() {
+  local file="${CONFIG_ROOT}/xray-client.txt"
+  local server port uuid flow sni fingerprint public_key short_id
+
+  server="$(config_value "${file}" "server")"
+  port="$(config_value "${file}" "port")"
+  uuid="$(config_value "${file}" "uuid")"
+  flow="$(config_value "${file}" "flow")"
+  sni="$(config_value "${file}" "sni")"
+  fingerprint="$(config_value "${file}" "fingerprint")"
+  public_key="$(config_value "${file}" "public_key")"
+  short_id="$(config_value "${file}" "short_id")"
+
+  [[ -n "${fingerprint}" ]] || fingerprint="chrome"
+
+  cat <<EOF
+  - name: $(quote_yaml_string "theLadder-Xray")
+    type: vless
+    server: $(quote_yaml_string "${server}")
+    port: ${port}
+    uuid: $(quote_yaml_string "${uuid}")
+    network: tcp
+    tls: true
+    udp: true
+    flow: ${flow}
+    servername: $(quote_yaml_string "${sni}")
+    client-fingerprint: ${fingerprint}
+    reality-opts:
+      public-key: $(quote_yaml_string "${public_key}")
+      short-id: $(quote_yaml_string "${short_id}")
+    packet-encoding: xudp
+    smux:
+      enabled: false
+EOF
 }

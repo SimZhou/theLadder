@@ -108,9 +108,41 @@ status_hysteria2() {
 }
 
 show_hysteria2() {
+  show_hysteria2_client_info
+  echo
+  echo "Mihomo proxies:"
+  echo "proxies:"
+  print_hysteria2_mihomo_proxy
+}
+
+show_hysteria2_client_info() {
   if [[ -f "${CONFIG_ROOT}/hysteria2-client.yaml" ]]; then
     cat "${CONFIG_ROOT}/hysteria2-client.yaml"
   else
     die "Hysteria2 client info not found. Run: $0 install hysteria2"
   fi
+}
+
+print_hysteria2_mihomo_proxy() {
+  local file="${CONFIG_ROOT}/hysteria2-client.yaml"
+  local server_endpoint server port password sni obfs_password
+
+  server_endpoint="$(config_value "${file}" "server")"
+  server="${server_endpoint%:*}"
+  port="${server_endpoint##*:}"
+  password="$(config_value "${file}" "auth")"
+  sni="$(indented_config_value "${file}" "sni")"
+  obfs_password="$(indented_config_value "${file}" "password")"
+
+  cat <<EOF
+  - name: $(quote_yaml_string "theLadder-Hysteria2")
+    type: hysteria2
+    server: $(quote_yaml_string "${server}")
+    port: ${port}
+    password: $(quote_yaml_string "${password}")
+    sni: $(quote_yaml_string "${sni}")
+    skip-cert-verify: true
+    obfs: salamander
+    obfs-password: $(quote_yaml_string "${obfs_password}")
+EOF
 }
