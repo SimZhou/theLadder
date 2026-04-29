@@ -66,11 +66,11 @@ status_best() {
 }
 
 show_best() {
+  print_section "Xray 原始客户端信息"
   show_xray_client_info
-  echo
+  print_section "Hysteria2 原始客户端信息"
   show_hysteria2_client_info
-  echo
-  echo "Mihomo proxies:"
+  print_section "mihomo 节点配置，复制整个 proxies 片段使用"
   echo "proxies:"
   print_xray_mihomo_proxy
   print_hysteria2_mihomo_proxy

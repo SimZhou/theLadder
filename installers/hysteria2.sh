@@ -108,9 +108,9 @@ status_hysteria2() {
 }
 
 show_hysteria2() {
+  print_section "Hysteria2 原始客户端信息"
   show_hysteria2_client_info
-  echo
-  echo "Mihomo proxies:"
+  print_section "Hysteria2 的 mihomo 节点配置，复制到 proxies 下使用"
   echo "proxies:"
   print_hysteria2_mihomo_proxy
 }

@@ -159,9 +159,9 @@ status_xray() {
 }
 
 show_xray() {
+  print_section "Xray 原始客户端信息"
   show_xray_client_info
-  echo
-  echo "Mihomo proxies:"
+  print_section "Xray 的 mihomo 节点配置，复制到 proxies 下使用"
   echo "proxies:"
   print_xray_mihomo_proxy
 }

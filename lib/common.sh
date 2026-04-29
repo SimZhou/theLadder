@@ -210,6 +210,12 @@ indented_config_value() {
   ' "${file}"
 }
 
+print_section() {
+  local title="$1"
+
+  printf '\n========== %s ==========\n' "${title}"
+}
+
 public_ip() {
   local ip=""
   ip="$(curl -fsS --max-time 3 https://api.ipify.org 2>/dev/null || true)"
