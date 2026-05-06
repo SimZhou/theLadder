@@ -65,6 +65,8 @@ sudo ./ladder.sh install lan-proxy --listen 0.0.0.0 --port 7890 --user theladder
 ~/.local/state/theladder/log/lan-proxy.log
 ```
 
+重复执行安装时，如果 `~/.local/bin/sing-box` 已存在，会复用现有二进制。
+
 ## 查看信息
 
 ```bash
@@ -151,6 +153,12 @@ export all_proxy="socks5://用户:密码@出口机内网IP:7890"
 ```
 
 只在可信内网开放该端口；如果出口机有防火墙或云安全组，需要仅向内网来源放行 `7890/tcp`。
+
+如果提示端口已占用，换一个高位端口重新安装：
+
+```bash
+./ladder.sh install lan-proxy-user --port 18080
+```
 
 ## 旧组件清理
 

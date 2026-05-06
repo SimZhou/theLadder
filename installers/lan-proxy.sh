@@ -162,6 +162,11 @@ install_sing_box_binary() {
   local install_bin_root="$1"
   local tag version archive url tmp_dir sing_box_asset_arch binary_path
 
+  if [[ -x "${install_bin_root}/sing-box" ]]; then
+    log_info "sing-box already exists: ${install_bin_root}/sing-box"
+    return
+  fi
+
   case "${ARCH}" in
     amd64) sing_box_asset_arch="amd64" ;;
     arm64) sing_box_asset_arch="arm64" ;;
@@ -316,6 +321,7 @@ start_lan_proxy_user() {
   local config_file="${LAN_PROXY_USER_CONFIG_ROOT}/lan-proxy.json"
   local pid_file="${LAN_PROXY_USER_STATE_ROOT}/lan-proxy.pid"
   local log_file="${LAN_PROXY_USER_LOG_ROOT}/lan-proxy.log"
+  local port
 
   [[ -x "${binary}" ]] || die "sing-box not found. Run: $0 install lan-proxy-user"
   [[ -f "${config_file}" ]] || die "lan-proxy config not found. Run: $0 install lan-proxy-user"
@@ -325,6 +331,10 @@ start_lan_proxy_user() {
     log_info "LAN proxy user-mode is already running. pid=$(cat "${pid_file}")"
     return
   fi
+
+  port="$(lan_proxy_config_listen_port "${config_file}")"
+  [[ -n "${port}" ]] || die "Unable to read lan-proxy listen port from ${config_file}"
+  assert_lan_proxy_port_available "${port}"
 
   nohup "${binary}" run -c "${config_file}" >>"${log_file}" 2>&1 &
   echo "$!" >"${pid_file}"
@@ -336,6 +346,56 @@ start_lan_proxy_user() {
   }
 
   log_info "LAN proxy user-mode started. pid=$(cat "${pid_file}")"
+}
+
+lan_proxy_config_listen_port() {
+  local config_file="$1"
+
+  awk '
+    /"listen_port"[[:space:]]*:/ {
+      gsub(/[^0-9]/, "")
+      print
+      exit
+    }
+  ' "${config_file}"
+}
+
+assert_lan_proxy_port_available() {
+  local port="$1"
+  local owner=""
+
+  owner="$(lan_proxy_port_owner "${port}")"
+  if [[ -n "${owner}" ]]; then
+    die "TCP port ${port} is already in use: ${owner}. Use another port, for example: $0 install lan-proxy-user --port 18080"
+  fi
+}
+
+lan_proxy_port_owner() {
+  local port="$1"
+
+  if command_exists ss; then
+    ss -ltnp 2>/dev/null | awk -v suffix=":${port}" '
+      NR > 1 && $4 ~ suffix "$" {
+        print $0
+        exit
+      }
+    '
+    return
+  fi
+
+  if command_exists lsof; then
+    lsof -nP -iTCP:"${port}" -sTCP:LISTEN 2>/dev/null | awk 'NR == 2 { print; exit }'
+    return
+  fi
+
+  if command_exists netstat; then
+    netstat -ltnp 2>/dev/null | awk -v suffix=":${port}" '
+      NR > 2 && $4 ~ suffix "$" {
+        print $0
+        exit
+      }
+    '
+  fi
 }
 
 stop_lan_proxy_user() {
