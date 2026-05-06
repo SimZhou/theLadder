@@ -9,6 +9,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${SCRIPT_DIR}/installers/xray.sh"
 # shellcheck source=installers/hysteria2.sh
 . "${SCRIPT_DIR}/installers/hysteria2.sh"
+# shellcheck source=installers/lan-proxy.sh
+. "${SCRIPT_DIR}/installers/lan-proxy.sh"
 # shellcheck source=installers/legacy.sh
 . "${SCRIPT_DIR}/installers/legacy.sh"
 
@@ -37,14 +39,25 @@ theLadder - Linux 代理服务一键部署脚本
   ./ladder.sh install xray [port] [reality_sni] [reality_dest]
   ./ladder.sh install hysteria2 [udp_port]
 
+内网直通代理：
+  sudo ./ladder.sh install lan-proxy [--port 7890] [--listen 0.0.0.0] [--user theladder] [--password password]
+  sudo ./ladder.sh show lan-proxy
+
+无 root 内网直通代理：
+  ./ladder.sh install lan-proxy-user [--port 7890] [--listen 0.0.0.0] [--user theladder] [--password password]
+  ./ladder.sh start|stop|restart|status|show lan-proxy-user
+
+  lan-proxy 会在一台能访问外网的机器上提供 HTTP/SOCKS5 混合代理。
+  内网机器只需要能访问这台机器的监听地址和端口，就可以通过代理联网。
+
 查看配置：
-  ./ladder.sh show xray|hysteria2|best
+  ./ladder.sh show xray|hysteria2|lan-proxy|lan-proxy-user|best
 
 查看运行状态：
-  ./ladder.sh status xray|hysteria2|best
+  ./ladder.sh status xray|hysteria2|lan-proxy|lan-proxy-user|best
 
 卸载：
-  ./ladder.sh uninstall xray|hysteria2|best
+  ./ladder.sh uninstall xray|hysteria2|lan-proxy|lan-proxy-user|best
 
 旧版 Shadowsocks/SSR 清理：
   ./ladder.sh legacy status
@@ -53,6 +66,7 @@ theLadder - Linux 代理服务一键部署脚本
 默认值：
   Xray 端口：443/tcp
   Hysteria2 端口：443/udp
+  LAN Proxy 端口：7890/tcp
   REALITY SNI：www.microsoft.com
 
 协议选择建议：
@@ -140,6 +154,8 @@ main() {
           validate_port "${1:-443}"
           install_hysteria2 "$@"
           ;;
+        lan-proxy) install_lan_proxy "$@" ;;
+        lan-proxy-user) install_lan_proxy_user "$@" ;;
         *) usage; exit 1 ;;
       esac
       ;;
@@ -148,6 +164,8 @@ main() {
         best|"") uninstall_best ;;
         xray) uninstall_xray ;;
         hysteria2) uninstall_hysteria2 ;;
+        lan-proxy) uninstall_lan_proxy ;;
+        lan-proxy-user) uninstall_lan_proxy_user ;;
         *) usage; exit 1 ;;
       esac
       ;;
@@ -156,6 +174,8 @@ main() {
         best|"") status_best ;;
         xray) status_xray ;;
         hysteria2) status_hysteria2 ;;
+        lan-proxy) status_lan_proxy ;;
+        lan-proxy-user) status_lan_proxy_user ;;
         *) usage; exit 1 ;;
       esac
       ;;
@@ -164,6 +184,26 @@ main() {
         best|"") show_best ;;
         xray) show_xray ;;
         hysteria2) show_hysteria2 ;;
+        lan-proxy) show_lan_proxy ;;
+        lan-proxy-user) show_lan_proxy_user ;;
+        *) usage; exit 1 ;;
+      esac
+      ;;
+    start)
+      case "${target}" in
+        lan-proxy-user) start_lan_proxy_user ;;
+        *) usage; exit 1 ;;
+      esac
+      ;;
+    stop)
+      case "${target}" in
+        lan-proxy-user) stop_lan_proxy_user ;;
+        *) usage; exit 1 ;;
+      esac
+      ;;
+    restart)
+      case "${target}" in
+        lan-proxy-user) restart_lan_proxy_user ;;
         *) usage; exit 1 ;;
       esac
       ;;
