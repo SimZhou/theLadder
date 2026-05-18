@@ -46,13 +46,13 @@ install_lan_proxy() {
   target_user="$(lan_proxy_install_target_user "${install_scope}")"
 
   if [[ "${install_scope}" == "user" ]]; then
-    install_lan_proxy_user_impl "${target_user}" "${port}" "${listen}" "${username}" "${password}"
+    install_lan_proxy_user_parsed_impl "${target_user}" "${port}" "${listen}" "${username}" "${password}"
     return
   fi
 
   if [[ "${EUID}" -ne 0 ]]; then
     log_info "检测到当前不是 root，改为用户级安装。"
-    install_lan_proxy_user_impl "${target_user}" "${port}" "${listen}" "${username}" "${password}"
+    install_lan_proxy_user_parsed_impl "${target_user}" "${port}" "${listen}" "${username}" "${password}"
     return
   fi
 
@@ -86,9 +86,14 @@ install_lan_proxy() {
 
 install_lan_proxy_user() {
   local target_user
+  local port="7890"
+  local listen="0.0.0.0"
+  local username="theladder"
+  local password=""
 
+  parse_lan_proxy_install_args "$@"
   target_user="$(lan_proxy_install_target_user "user")"
-  install_lan_proxy_user_impl "${target_user}" "$@"
+  install_lan_proxy_user_parsed_impl "${target_user}" "${port}" "${listen}" "${username}" "${password}"
 }
 
 install_lan_proxy_user_impl() {
@@ -100,6 +105,16 @@ install_lan_proxy_user_impl() {
   local password=""
 
   parse_lan_proxy_install_args "$@"
+  install_lan_proxy_user_parsed_impl "${target_user}" "${port}" "${listen}" "${username}" "${password}"
+}
+
+install_lan_proxy_user_parsed_impl() {
+  local target_user="$1"
+  local port="$2"
+  local listen="$3"
+  local username="$4"
+  local password="$5"
+
   validate_lan_proxy_user_target "${target_user}"
   validate_port "${port}"
   validate_lan_proxy_listen "${listen}"
