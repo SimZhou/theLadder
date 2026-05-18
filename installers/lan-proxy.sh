@@ -1,17 +1,61 @@
 #!/usr/bin/env bash
 
-LAN_PROXY_USER_BIN_ROOT="${HOME}/.local/bin"
-LAN_PROXY_USER_CONFIG_ROOT="${HOME}/.config/theladder"
-LAN_PROXY_USER_STATE_ROOT="${HOME}/.local/state/theladder"
-LAN_PROXY_USER_LOG_ROOT="${HOME}/.local/state/theladder/log"
+parse_lan_proxy_scope_arg() {
+  local scope="${1:-}"
+  shift || true
+
+  while (($# > 0)); do
+    case "$1" in
+      --user|--user-mode)
+        scope="user"
+        shift
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+
+  echo "${scope}"
+}
+
+lan_proxy_effective_scope() {
+  local requested_scope="${1:-}"
+
+  if [[ "${requested_scope}" == "user" ]]; then
+    echo "user"
+    return
+  fi
+
+  if [[ "${EUID}" -eq 0 ]]; then
+    echo "system"
+  else
+    echo "user"
+  fi
+}
 
 install_lan_proxy() {
   local port="7890"
   local listen="0.0.0.0"
   local username="theladder"
   local password=""
+  local install_scope="system"
+  local target_user=""
 
   parse_lan_proxy_install_args "$@"
+  target_user="$(lan_proxy_install_target_user "${install_scope}")"
+
+  if [[ "${install_scope}" == "user" ]]; then
+    install_lan_proxy_user_impl "${target_user}" "${port}" "${listen}" "${username}" "${password}"
+    return
+  fi
+
+  if [[ "${EUID}" -ne 0 ]]; then
+    log_info "检测到当前不是 root，改为用户级安装。"
+    install_lan_proxy_user_impl "${target_user}" "${port}" "${listen}" "${username}" "${password}"
+    return
+  fi
+
   validate_port "${port}"
   validate_lan_proxy_listen "${listen}"
   validate_lan_proxy_credential "${username}" "用户名"
@@ -41,15 +85,22 @@ install_lan_proxy() {
 }
 
 install_lan_proxy_user() {
+  local target_user
+
+  target_user="$(lan_proxy_install_target_user "user")"
+  install_lan_proxy_user_impl "${target_user}" "$@"
+}
+
+install_lan_proxy_user_impl() {
+  local target_user="$1"
+  shift
   local port="7890"
   local listen="0.0.0.0"
   local username="theladder"
   local password=""
-  local config_file="${LAN_PROXY_USER_CONFIG_ROOT}/lan-proxy.json"
-  local client_file="${LAN_PROXY_USER_CONFIG_ROOT}/lan-proxy-client.txt"
-  local binary="${LAN_PROXY_USER_BIN_ROOT}/sing-box"
 
   parse_lan_proxy_install_args "$@"
+  validate_lan_proxy_user_target "${target_user}"
   validate_port "${port}"
   validate_lan_proxy_listen "${listen}"
   validate_lan_proxy_credential "${username}" "用户名"
@@ -58,19 +109,38 @@ install_lan_proxy_user() {
   require_lan_proxy_user_tools
   detect_arch
 
-  mkdir -p "${LAN_PROXY_USER_BIN_ROOT}" "${LAN_PROXY_USER_CONFIG_ROOT}" "${LAN_PROXY_USER_STATE_ROOT}" "${LAN_PROXY_USER_LOG_ROOT}"
+  local user_home
+  local user_bin_root
+  local user_config_root
+  local user_state_root
+  local user_log_root
+  local config_file
+  local client_file
+  local binary
+
+  user_home="$(lan_proxy_user_home "${target_user}")"
+  user_bin_root="${user_home}/.local/bin"
+  user_config_root="${user_home}/.config/theladder"
+  user_state_root="${user_home}/.local/state/theladder"
+  user_log_root="${user_state_root}/log"
+  config_file="${user_config_root}/lan-proxy.json"
+  client_file="${user_config_root}/lan-proxy-client.txt"
+  binary="${user_bin_root}/sing-box"
+
+  mkdir -p "${user_bin_root}" "${user_config_root}" "${user_state_root}" "${user_log_root}"
 
   if [[ -z "${password}" ]]; then
     password="$(random_hex 16)"
   fi
 
-  install_sing_box_binary "${LAN_PROXY_USER_BIN_ROOT}"
+  install_sing_box_binary "${user_bin_root}"
   write_lan_proxy_config "${config_file}" "${port}" "${listen}" "${username}" "${password}"
   "${binary}" check -c "${config_file}"
   write_lan_proxy_client_info "${client_file}" "${port}" "${listen}" "${username}" "${password}"
-  start_lan_proxy_user
+  ensure_lan_proxy_user_ownership "${target_user}" "${user_bin_root}" "${user_config_root}" "${user_state_root}"
+  start_lan_proxy_user_for_target "${target_user}"
 
-  log_info "LAN proxy user-mode installed."
+  log_info "LAN proxy 用户级安装完成。目标用户：${target_user}"
   echo
   cat "${client_file}"
 }
@@ -88,8 +158,8 @@ parse_lan_proxy_install_args() {
         listen="$2"
         shift 2
         ;;
-      --user|--username)
-        [[ $# -ge 2 ]] || die "$1 requires a value."
+      --username)
+        [[ $# -ge 2 ]] || die "--username requires a value."
         username="$2"
         shift 2
         ;;
@@ -97,6 +167,10 @@ parse_lan_proxy_install_args() {
         [[ $# -ge 2 ]] || die "--password requires a value."
         password="$2"
         shift 2
+        ;;
+      --user|--user-mode)
+        install_scope="user"
+        shift
         ;;
       -h|--help)
         usage
@@ -156,6 +230,76 @@ warn_lan_proxy_user_privileged_port() {
   if ((port < 1024)); then
     log_warn "无 root 模式通常不能监听 1024 以下端口，建议使用 7890、8080 等高位端口。"
   fi
+}
+
+lan_proxy_install_target_user() {
+  local install_scope="${1:-system}"
+
+  if [[ "${install_scope}" == "user" ]]; then
+    if [[ "${EUID}" -eq 0 && -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+      echo "${SUDO_USER}"
+      return
+    fi
+  fi
+
+  if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+    echo "${SUDO_USER}"
+  else
+    id -un
+  fi
+}
+
+validate_lan_proxy_user_target() {
+  local target_user="$1"
+
+  [[ -n "${target_user}" ]] || die "无法确定用户级安装目标用户。"
+  lan_proxy_user_home "${target_user}" >/dev/null
+}
+
+lan_proxy_user_home() {
+  local target_user="$1"
+  local home_dir=""
+
+  if command_exists getent; then
+    home_dir="$(getent passwd "${target_user}" | awk -F: 'NR == 1 { print $6 }')"
+  fi
+
+  if [[ -z "${home_dir}" ]]; then
+    home_dir="$(awk -F: -v user="${target_user}" '$1 == user { print $6; exit }' /etc/passwd)"
+  fi
+
+  [[ -n "${home_dir}" ]] || die "无法解析用户 ${target_user} 的 home 目录。"
+  echo "${home_dir}"
+}
+
+ensure_lan_proxy_user_ownership() {
+  local target_user="$1"
+  shift
+
+  if [[ "${EUID}" -eq 0 && "${target_user}" != "root" ]]; then
+    chown -R "${target_user}" "$@"
+  fi
+}
+
+lan_proxy_run_as_target_user() {
+  local target_user="$1"
+  local user_home="$2"
+  local command="$3"
+
+  if [[ "${EUID}" -eq 0 && "${target_user}" != "$(id -un)" ]]; then
+    if command_exists runuser; then
+      runuser -u "${target_user}" -- env HOME="${user_home}" bash -lc "${command}"
+      return
+    fi
+    if command_exists sudo; then
+      sudo -u "${target_user}" env HOME="${user_home}" bash -lc "${command}"
+      return
+    fi
+    su -s /bin/bash - "${target_user}" -c "${command}"
+    return
+  fi
+
+  env HOME="${user_home}" bash -lc "${command}"
 }
 
 install_sing_box_binary() {
@@ -296,6 +440,17 @@ detect_lan_ip() {
 }
 
 uninstall_lan_proxy() {
+  local requested_scope=""
+  local effective_scope=""
+
+  requested_scope="$(parse_lan_proxy_scope_arg "" "$@")"
+  effective_scope="$(lan_proxy_effective_scope "${requested_scope}")"
+
+  if [[ "${effective_scope}" == "user" ]]; then
+    uninstall_lan_proxy_user "$@"
+    return
+  fi
+
   require_root
   stop_disable_service "theladder-lan-proxy"
   rm -f "${CONFIG_ROOT}/lan-proxy.json" "${CONFIG_ROOT}/lan-proxy-client.txt"
@@ -303,31 +458,95 @@ uninstall_lan_proxy() {
 }
 
 uninstall_lan_proxy_user() {
-  stop_lan_proxy_user || true
+  local target_user
+  local user_home
+  local user_config_root
+  local user_state_root
+  local user_log_root
+
+  target_user="$(lan_proxy_install_target_user "user")"
+  user_home="$(lan_proxy_user_home "${target_user}")"
+  user_config_root="${user_home}/.config/theladder"
+  user_state_root="${user_home}/.local/state/theladder"
+  user_log_root="${user_state_root}/log"
+
+  stop_lan_proxy_user_for_target "${target_user}" || true
   rm -f \
-    "${LAN_PROXY_USER_CONFIG_ROOT}/lan-proxy.json" \
-    "${LAN_PROXY_USER_CONFIG_ROOT}/lan-proxy-client.txt" \
-    "${LAN_PROXY_USER_STATE_ROOT}/lan-proxy.pid" \
-    "${LAN_PROXY_USER_LOG_ROOT}/lan-proxy.log"
-  log_info "LAN proxy user-mode removed."
+    "${user_config_root}/lan-proxy.json" \
+    "${user_config_root}/lan-proxy-client.txt" \
+    "${user_state_root}/lan-proxy.pid" \
+    "${user_log_root}/lan-proxy.log"
+  log_info "LAN proxy 用户级安装已移除。目标用户：${target_user}"
 }
 
 status_lan_proxy() {
+  local requested_scope=""
+  local effective_scope=""
+
+  requested_scope="$(parse_lan_proxy_scope_arg "" "$@")"
+  effective_scope="$(lan_proxy_effective_scope "${requested_scope}")"
+
+  if [[ "${effective_scope}" == "user" ]]; then
+    status_lan_proxy_user "$@"
+    return
+  fi
+
   systemctl --no-pager --full status theladder-lan-proxy
 }
 
+start_lan_proxy() {
+  local requested_scope=""
+  local effective_scope=""
+
+  requested_scope="$(parse_lan_proxy_scope_arg "" "$@")"
+  effective_scope="$(lan_proxy_effective_scope "${requested_scope}")"
+
+  if [[ "${effective_scope}" == "user" ]]; then
+    start_lan_proxy_user "$@"
+    return
+  fi
+
+  require_root
+  systemctl start theladder-lan-proxy
+  systemctl --no-pager --full status theladder-lan-proxy || true
+  systemctl is-active --quiet theladder-lan-proxy || die "Service theladder-lan-proxy is not active after start."
+}
+
 start_lan_proxy_user() {
-  local binary="${LAN_PROXY_USER_BIN_ROOT}/sing-box"
-  local config_file="${LAN_PROXY_USER_CONFIG_ROOT}/lan-proxy.json"
-  local pid_file="${LAN_PROXY_USER_STATE_ROOT}/lan-proxy.pid"
-  local log_file="${LAN_PROXY_USER_LOG_ROOT}/lan-proxy.log"
+  local target_user
+
+  target_user="$(lan_proxy_install_target_user "user")"
+  start_lan_proxy_user_for_target "${target_user}"
+}
+
+start_lan_proxy_user_for_target() {
+  local target_user="$1"
+  local user_home
+  local user_bin_root
+  local user_config_root
+  local user_state_root
+  local user_log_root
+  local binary
+  local config_file
+  local pid_file
+  local log_file
   local port
 
-  [[ -x "${binary}" ]] || die "sing-box not found. Run: $0 install lan-proxy-user"
-  [[ -f "${config_file}" ]] || die "lan-proxy config not found. Run: $0 install lan-proxy-user"
-  mkdir -p "${LAN_PROXY_USER_STATE_ROOT}" "${LAN_PROXY_USER_LOG_ROOT}"
+  user_home="$(lan_proxy_user_home "${target_user}")"
+  user_bin_root="${user_home}/.local/bin"
+  user_config_root="${user_home}/.config/theladder"
+  user_state_root="${user_home}/.local/state/theladder"
+  user_log_root="${user_state_root}/log"
+  binary="${user_bin_root}/sing-box"
+  config_file="${user_config_root}/lan-proxy.json"
+  pid_file="${user_state_root}/lan-proxy.pid"
+  log_file="${user_log_root}/lan-proxy.log"
 
-  if lan_proxy_user_is_running; then
+  [[ -x "${binary}" ]] || die "sing-box not found. Run: $0 install lan-proxy --user"
+  [[ -f "${config_file}" ]] || die "lan-proxy config not found. Run: $0 install lan-proxy --user"
+  mkdir -p "${user_state_root}" "${user_log_root}"
+
+  if lan_proxy_user_is_running_for_target "${target_user}"; then
     log_info "LAN proxy user-mode is already running. pid=$(cat "${pid_file}")"
     return
   fi
@@ -336,11 +555,22 @@ start_lan_proxy_user() {
   [[ -n "${port}" ]] || die "Unable to read lan-proxy listen port from ${config_file}"
   assert_lan_proxy_port_available "${port}"
 
-  nohup "${binary}" run -c "${config_file}" >>"${log_file}" 2>&1 &
-  echo "$!" >"${pid_file}"
+  local binary_q
+  local config_q
+  local log_q
+  local pid_q
+  local start_command
+
+  printf -v binary_q '%q' "${binary}"
+  printf -v config_q '%q' "${config_file}"
+  printf -v log_q '%q' "${log_file}"
+  printf -v pid_q '%q' "${pid_file}"
+  start_command="nohup ${binary_q} run -c ${config_q} >>${log_q} 2>&1 & echo \$! > ${pid_q}"
+
+  lan_proxy_run_as_target_user "${target_user}" "${user_home}" "${start_command}"
   sleep 1
 
-  lan_proxy_user_is_running || {
+  lan_proxy_user_is_running_for_target "${target_user}" || {
     rm -f "${pid_file}"
     die "LAN proxy user-mode failed to start. Check log: ${log_file}"
   }
@@ -366,7 +596,7 @@ assert_lan_proxy_port_available() {
 
   owner="$(lan_proxy_port_owner "${port}")"
   if [[ -n "${owner}" ]]; then
-    die "TCP port ${port} is already in use: ${owner}. Use another port, for example: $0 install lan-proxy-user --port 18080"
+    die "TCP port ${port} is already in use: ${owner}. Use another port, for example: $0 install lan-proxy --user --port 18080"
   fi
 }
 
@@ -398,9 +628,39 @@ lan_proxy_port_owner() {
   fi
 }
 
+stop_lan_proxy() {
+  local requested_scope=""
+  local effective_scope=""
+
+  requested_scope="$(parse_lan_proxy_scope_arg "" "$@")"
+  effective_scope="$(lan_proxy_effective_scope "${requested_scope}")"
+
+  if [[ "${effective_scope}" == "user" ]]; then
+    stop_lan_proxy_user "$@"
+    return
+  fi
+
+  require_root
+  systemctl stop theladder-lan-proxy
+}
+
 stop_lan_proxy_user() {
-  local pid_file="${LAN_PROXY_USER_STATE_ROOT}/lan-proxy.pid"
+  local target_user
+
+  target_user="$(lan_proxy_install_target_user "user")"
+  stop_lan_proxy_user_for_target "${target_user}"
+}
+
+stop_lan_proxy_user_for_target() {
+  local target_user="$1"
+  local user_home
+  local user_state_root
+  local pid_file
   local pid
+
+  user_home="$(lan_proxy_user_home "${target_user}")"
+  user_state_root="${user_home}/.local/state/theladder"
+  pid_file="${user_state_root}/lan-proxy.pid"
 
   if [[ ! -f "${pid_file}" ]]; then
     log_info "LAN proxy user-mode is not running."
@@ -420,18 +680,47 @@ stop_lan_proxy_user() {
   log_info "LAN proxy user-mode stopped."
 }
 
+restart_lan_proxy() {
+  local requested_scope=""
+  local effective_scope=""
+
+  requested_scope="$(parse_lan_proxy_scope_arg "" "$@")"
+  effective_scope="$(lan_proxy_effective_scope "${requested_scope}")"
+
+  if [[ "${effective_scope}" == "user" ]]; then
+    restart_lan_proxy_user "$@"
+    return
+  fi
+
+  require_root
+  restart_service "theladder-lan-proxy"
+}
+
 restart_lan_proxy_user() {
-  stop_lan_proxy_user
-  start_lan_proxy_user
+  stop_lan_proxy_user "$@"
+  start_lan_proxy_user "$@"
 }
 
 status_lan_proxy_user() {
-  local pid_file="${LAN_PROXY_USER_STATE_ROOT}/lan-proxy.pid"
-  local log_file="${LAN_PROXY_USER_LOG_ROOT}/lan-proxy.log"
+  local target_user
+  local user_home
+  local user_config_root
+  local user_state_root
+  local user_log_root
+  local pid_file
+  local log_file
 
-  if lan_proxy_user_is_running; then
+  target_user="$(lan_proxy_install_target_user "user")"
+  user_home="$(lan_proxy_user_home "${target_user}")"
+  user_config_root="${user_home}/.config/theladder"
+  user_state_root="${user_home}/.local/state/theladder"
+  user_log_root="${user_state_root}/log"
+  pid_file="${user_state_root}/lan-proxy.pid"
+  log_file="${user_log_root}/lan-proxy.log"
+
+  if lan_proxy_user_is_running_for_target "${target_user}"; then
     echo "LAN proxy user-mode is running. pid=$(cat "${pid_file}")"
-    echo "config: ${LAN_PROXY_USER_CONFIG_ROOT}/lan-proxy.json"
+    echo "config: ${user_config_root}/lan-proxy.json"
     echo "log: ${log_file}"
   else
     echo "LAN proxy user-mode is not running."
@@ -441,8 +730,22 @@ status_lan_proxy_user() {
 }
 
 lan_proxy_user_is_running() {
-  local pid_file="${LAN_PROXY_USER_STATE_ROOT}/lan-proxy.pid"
+  local target_user
+
+  target_user="$(lan_proxy_install_target_user "user")"
+  lan_proxy_user_is_running_for_target "${target_user}"
+}
+
+lan_proxy_user_is_running_for_target() {
+  local target_user="$1"
+  local user_home
+  local user_state_root
+  local pid_file
   local pid
+
+  user_home="$(lan_proxy_user_home "${target_user}")"
+  user_state_root="${user_home}/.local/state/theladder"
+  pid_file="${user_state_root}/lan-proxy.pid"
 
   [[ -f "${pid_file}" ]] || return 1
   pid="$(cat "${pid_file}")"
@@ -451,6 +754,17 @@ lan_proxy_user_is_running() {
 }
 
 show_lan_proxy() {
+  local requested_scope=""
+  local effective_scope=""
+
+  requested_scope="$(parse_lan_proxy_scope_arg "" "$@")"
+  effective_scope="$(lan_proxy_effective_scope "${requested_scope}")"
+
+  if [[ "${effective_scope}" == "user" ]]; then
+    show_lan_proxy_user "$@"
+    return
+  fi
+
   print_section "LAN Proxy 客户端信息"
   show_lan_proxy_client_info
   print_section "Linux 临时代理环境变量"
@@ -460,10 +774,18 @@ show_lan_proxy() {
 }
 
 show_lan_proxy_user() {
-  local client_file="${LAN_PROXY_USER_CONFIG_ROOT}/lan-proxy-client.txt"
+  local target_user
+  local user_home
+  local user_config_root
+  local client_file
+
+  target_user="$(lan_proxy_install_target_user "user")"
+  user_home="$(lan_proxy_user_home "${target_user}")"
+  user_config_root="${user_home}/.config/theladder"
+  client_file="${user_config_root}/lan-proxy-client.txt"
 
   print_section "LAN Proxy User-Mode 客户端信息"
-  show_lan_proxy_client_info_file "${client_file}" "install lan-proxy-user"
+  show_lan_proxy_client_info_file "${client_file}" "install lan-proxy --user"
   print_section "Linux 临时代理环境变量"
   print_lan_proxy_env_file "${client_file}"
   print_section "常用客户端地址"
