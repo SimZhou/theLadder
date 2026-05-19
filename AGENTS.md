@@ -5,6 +5,8 @@ This repository maintains Linux proxy deployment scripts. Keep the design simple
 ## Design Principles
 
 - Prefer one clear entrypoint over many loosely related scripts. New user-facing commands should live behind a single CLI surface.
+- `lan-proxy` must remain a single target. User-mode behavior should be selected with `--user`, not by introducing a separate `lan-proxy-user` command again.
+- `lan-proxy --user` should be managed by user-level `systemd` units. Do not reintroduce `nohup`, pid files, or ad-hoc background-process management for user mode.
 - Keep install, uninstall, status, restart, and link/config display behavior consistent across protocols.
 - Use `systemd` units for managed services on supported Linux distributions. Keep legacy `init.d` support only as a compatibility path when needed.
 - Do not depend on Python 2. Shadowsocks/SSR support is legacy maintenance only; avoid new Python-based server dependencies.
