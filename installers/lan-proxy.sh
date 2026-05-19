@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+LAN_PROXY_SERVICE_NAME="theladder-lan-proxy"
+
 parse_lan_proxy_scope_arg() {
   local scope="${1:-}"
   shift || true
@@ -39,6 +41,7 @@ install_lan_proxy() {
   local listen="0.0.0.0"
   local username="theladder"
   local password=""
+  local upstream=""
   local install_scope="system"
   local target_user=""
 
@@ -46,42 +49,17 @@ install_lan_proxy() {
   target_user="$(lan_proxy_install_target_user "${install_scope}")"
 
   if [[ "${install_scope}" == "user" ]]; then
-    install_lan_proxy_user_parsed_impl "${target_user}" "${port}" "${listen}" "${username}" "${password}"
+    install_lan_proxy_user_parsed_impl "${target_user}" "${port}" "${listen}" "${username}" "${password}" "${upstream}"
     return
   fi
 
   if [[ "${EUID}" -ne 0 ]]; then
     log_info "检测到当前不是 root，改为用户级安装。"
-    install_lan_proxy_user_parsed_impl "${target_user}" "${port}" "${listen}" "${username}" "${password}"
+    install_lan_proxy_user_parsed_impl "${target_user}" "${port}" "${listen}" "${username}" "${password}" "${upstream}"
     return
   fi
 
-  validate_port "${port}"
-  validate_lan_proxy_listen "${listen}"
-  validate_lan_proxy_credential "${username}" "用户名"
-  [[ -z "${password}" ]] || validate_lan_proxy_credential "${password}" "密码"
-
-  require_root
-  ensure_layout
-  ensure_base_tools
-  detect_arch
-
-  if [[ -z "${password}" ]]; then
-    password="$(random_hex 16)"
-  fi
-
-  install_sing_box_binary "${BIN_ROOT}"
-  write_lan_proxy_config "${CONFIG_ROOT}/lan-proxy.json" "${port}" "${listen}" "${username}" "${password}"
-  "${BIN_ROOT}/sing-box" check -c "${CONFIG_ROOT}/lan-proxy.json"
-
-  write_systemd_service "theladder-lan-proxy" "${BIN_ROOT}/sing-box run -c ${CONFIG_ROOT}/lan-proxy.json" "theLadder LAN HTTP/SOCKS direct proxy"
-  open_firewall_port "${port}" "tcp"
-  restart_service "theladder-lan-proxy"
-  write_lan_proxy_client_info "${CONFIG_ROOT}/lan-proxy-client.txt" "${port}" "${listen}" "${username}" "${password}"
-
-  log_info "LAN proxy installed."
-  echo
-  cat "${CONFIG_ROOT}/lan-proxy-client.txt"
+  install_lan_proxy_system_impl "${port}" "${listen}" "${username}" "${password}" "${upstream}"
 }
 
 install_lan_proxy_user() {
@@ -90,22 +68,52 @@ install_lan_proxy_user() {
   local listen="0.0.0.0"
   local username="theladder"
   local password=""
+  local upstream=""
+  local install_scope="user"
 
   parse_lan_proxy_install_args "$@"
   target_user="$(lan_proxy_install_target_user "user")"
-  install_lan_proxy_user_parsed_impl "${target_user}" "${port}" "${listen}" "${username}" "${password}"
+  install_lan_proxy_user_parsed_impl "${target_user}" "${port}" "${listen}" "${username}" "${password}" "${upstream}"
 }
 
-install_lan_proxy_user_impl() {
-  local target_user="$1"
-  shift
-  local port="7890"
-  local listen="0.0.0.0"
-  local username="theladder"
-  local password=""
+install_lan_proxy_system_impl() {
+  local port="$1"
+  local listen="$2"
+  local username="$3"
+  local password="$4"
+  local upstream="$5"
+  local client_file
 
-  parse_lan_proxy_install_args "$@"
-  install_lan_proxy_user_parsed_impl "${target_user}" "${port}" "${listen}" "${username}" "${password}"
+  validate_port "${port}"
+  validate_lan_proxy_listen "${listen}"
+  warn_lan_proxy_upstream_credentials "${username}" "${password}" "${upstream}"
+  require_root
+  ensure_layout
+  ensure_base_tools
+  detect_arch
+
+  lan_proxy_apply_upstream_defaults "${upstream}" "${username}" "${password}"
+  username="${LAN_PROXY_USERNAME_RESULT}"
+  password="${LAN_PROXY_PASSWORD_RESULT}"
+
+  validate_lan_proxy_credential "${username}" "用户名"
+  validate_lan_proxy_credential "${password}" "密码"
+  validate_lan_proxy_upstream "${upstream}"
+
+  install_sing_box_binary "${BIN_ROOT}"
+  write_lan_proxy_config "${CONFIG_ROOT}/lan-proxy.json" "${port}" "${listen}" "${username}" "${password}" "${upstream}"
+  "${BIN_ROOT}/sing-box" check -c "${CONFIG_ROOT}/lan-proxy.json"
+
+  write_systemd_service "${LAN_PROXY_SERVICE_NAME}" "${BIN_ROOT}/sing-box run -c ${CONFIG_ROOT}/lan-proxy.json" "$(lan_proxy_service_description "${upstream}")"
+  open_firewall_port "${port}" "tcp"
+  restart_service "${LAN_PROXY_SERVICE_NAME}"
+
+  client_file="${CONFIG_ROOT}/lan-proxy-client.txt"
+  write_lan_proxy_client_info "${client_file}" "${port}" "${listen}" "${username}" "${password}" "${upstream}"
+
+  log_info "LAN proxy 安装完成。"
+  echo
+  cat "${client_file}"
 }
 
 install_lan_proxy_user_parsed_impl() {
@@ -114,46 +122,50 @@ install_lan_proxy_user_parsed_impl() {
   local listen="$3"
   local username="$4"
   local password="$5"
-
-  validate_lan_proxy_user_target "${target_user}"
-  validate_port "${port}"
-  validate_lan_proxy_listen "${listen}"
-  validate_lan_proxy_credential "${username}" "用户名"
-  [[ -z "${password}" ]] || validate_lan_proxy_credential "${password}" "密码"
-  warn_lan_proxy_user_privileged_port "${port}"
-  require_lan_proxy_user_tools
-  detect_arch
-
+  local upstream="$6"
   local user_home
   local user_bin_root
   local user_config_root
   local user_state_root
-  local user_log_root
+  local user_systemd_root
   local config_file
   local client_file
   local binary
+
+  validate_lan_proxy_user_target "${target_user}"
+  validate_port "${port}"
+  validate_lan_proxy_listen "${listen}"
+  warn_lan_proxy_upstream_credentials "${username}" "${password}" "${upstream}"
+  warn_lan_proxy_user_privileged_port "${port}"
+  require_lan_proxy_user_tools
+  detect_arch
+
+  lan_proxy_apply_upstream_defaults "${upstream}" "${username}" "${password}"
+  username="${LAN_PROXY_USERNAME_RESULT}"
+  password="${LAN_PROXY_PASSWORD_RESULT}"
+
+  validate_lan_proxy_credential "${username}" "用户名"
+  validate_lan_proxy_credential "${password}" "密码"
+  validate_lan_proxy_upstream "${upstream}"
 
   user_home="$(lan_proxy_user_home "${target_user}")"
   user_bin_root="${user_home}/.local/bin"
   user_config_root="${user_home}/.config/theladder"
   user_state_root="${user_home}/.local/state/theladder"
-  user_log_root="${user_state_root}/log"
+  user_systemd_root="${user_home}/.config/systemd/user"
   config_file="${user_config_root}/lan-proxy.json"
   client_file="${user_config_root}/lan-proxy-client.txt"
   binary="${user_bin_root}/sing-box"
 
-  mkdir -p "${user_bin_root}" "${user_config_root}" "${user_state_root}" "${user_log_root}"
-
-  if [[ -z "${password}" ]]; then
-    password="$(random_hex 16)"
-  fi
+  mkdir -p "${user_bin_root}" "${user_config_root}" "${user_state_root}" "${user_systemd_root}"
 
   install_sing_box_binary "${user_bin_root}"
-  write_lan_proxy_config "${config_file}" "${port}" "${listen}" "${username}" "${password}"
+  write_lan_proxy_config "${config_file}" "${port}" "${listen}" "${username}" "${password}" "${upstream}"
   "${binary}" check -c "${config_file}"
-  write_lan_proxy_client_info "${client_file}" "${port}" "${listen}" "${username}" "${password}"
-  ensure_lan_proxy_user_ownership "${target_user}" "${user_bin_root}" "${user_config_root}" "${user_state_root}"
-  start_lan_proxy_user_for_target "${target_user}"
+  write_lan_proxy_client_info "${client_file}" "${port}" "${listen}" "${username}" "${password}" "${upstream}"
+  write_lan_proxy_user_service "${target_user}" "${binary}" "${config_file}" "${upstream}"
+  ensure_lan_proxy_user_ownership "${target_user}" "${user_bin_root}" "${user_config_root}" "${user_state_root}" "${user_systemd_root}"
+  restart_lan_proxy_user_for_target "${target_user}"
 
   log_info "LAN proxy 用户级安装完成。目标用户：${target_user}"
   echo
@@ -183,6 +195,11 @@ parse_lan_proxy_install_args() {
         password="$2"
         shift 2
         ;;
+      --upstream)
+        [[ $# -ge 2 ]] || die "--upstream requires a value."
+        upstream="$2"
+        shift 2
+        ;;
       --user|--user-mode)
         install_scope="user"
         shift
@@ -203,6 +220,8 @@ parse_lan_proxy_install_args() {
           username="$1"
         elif [[ -z "${password}" ]]; then
           password="$1"
+        elif [[ -z "${upstream}" ]]; then
+          upstream="$1"
         else
           die "Too many lan-proxy arguments."
         fi
@@ -227,10 +246,20 @@ validate_lan_proxy_listen() {
   [[ "${value}" =~ ^[A-Za-z0-9:._-]+$ ]] || die "监听地址只能包含 ASCII 字母、数字和 :._-"
 }
 
+warn_lan_proxy_upstream_credentials() {
+  local username="$1"
+  local password="$2"
+  local upstream="$3"
+
+  if [[ -n "${upstream}" && ("${username}" != "theladder" || -n "${password}") ]]; then
+    log_info "检测到同时指定了 --upstream 和本地认证参数，将优先使用本地 --username/--password 作为 B 机器对外认证。"
+  fi
+}
+
 require_lan_proxy_user_tools() {
   local missing=()
 
-  for tool in curl tar openssl find awk sed head mktemp install; do
+  for tool in curl tar openssl find awk sed head mktemp install systemctl; do
     command_exists "${tool}" || missing+=("${tool}")
   done
 
@@ -287,6 +316,18 @@ lan_proxy_user_home() {
   echo "${home_dir}"
 }
 
+lan_proxy_user_uid() {
+  local target_user="$1"
+
+  id -u "${target_user}"
+}
+
+lan_proxy_user_runtime_dir() {
+  local target_user="$1"
+
+  echo "/run/user/$(lan_proxy_user_uid "${target_user}")"
+}
+
 ensure_lan_proxy_user_ownership() {
   local target_user="$1"
   shift
@@ -315,6 +356,49 @@ lan_proxy_run_as_target_user() {
   fi
 
   env HOME="${user_home}" bash -lc "${command}"
+}
+
+lan_proxy_user_systemctl() {
+  local target_user="$1"
+  shift
+  local user_home
+  local runtime_dir
+  local bus_path
+  local home_q
+  local runtime_q
+  local bus_q
+  local args=()
+  local arg
+  local arg_q
+  local command
+
+  user_home="$(lan_proxy_user_home "${target_user}")"
+  runtime_dir="$(lan_proxy_user_runtime_dir "${target_user}")"
+  bus_path="${runtime_dir}/bus"
+
+  printf -v home_q '%q' "${user_home}"
+  printf -v runtime_q '%q' "${runtime_dir}"
+
+  for arg in "$@"; do
+    printf -v arg_q '%q' "${arg}"
+    args+=("${arg_q}")
+  done
+
+  command="export HOME=${home_q} XDG_RUNTIME_DIR=${runtime_q};"
+  if [[ -S "${bus_path}" ]]; then
+    printf -v bus_q '%q' "unix:path=${bus_path}"
+    command="${command} export DBUS_SESSION_BUS_ADDRESS=${bus_q};"
+  fi
+  command="${command} systemctl --user ${args[*]}"
+
+  lan_proxy_run_as_target_user "${target_user}" "${user_home}" "${command}"
+}
+
+lan_proxy_require_user_systemd() {
+  local target_user="$1"
+
+  lan_proxy_user_systemctl "${target_user}" --version >/dev/null 2>&1 || die "systemctl --user 不可用，请确认该机器启用了用户级 systemd。"
+  lan_proxy_user_systemctl "${target_user}" daemon-reload >/dev/null 2>&1 || die "无法连接用户级 systemd。请先登录一次该用户，或由管理员执行 loginctl enable-linger ${target_user}。"
 }
 
 install_sing_box_binary() {
@@ -351,12 +435,159 @@ install_sing_box_binary() {
   log_info "sing-box installed: ${tag}"
 }
 
+lan_proxy_apply_upstream_defaults() {
+  local upstream="$1"
+  local username="$2"
+  local password="$3"
+  local parsed_username=""
+  local parsed_password=""
+  local parsed_parts=()
+  local line
+
+  if [[ -n "${upstream}" ]]; then
+    while IFS= read -r line; do
+      parsed_parts+=("${line}")
+    done < <(parse_lan_proxy_upstream_url "${upstream}")
+    parsed_username="${parsed_parts[3]}"
+    parsed_password="${parsed_parts[4]}"
+  fi
+
+  if [[ "${username}" == "theladder" && -z "${password}" && -n "${parsed_username}" && -n "${parsed_password}" ]]; then
+    username="${parsed_username}"
+    password="${parsed_password}"
+  elif [[ -z "${password}" ]]; then
+    password="$(random_hex 16)"
+  fi
+
+  LAN_PROXY_USERNAME_RESULT="${username}"
+  LAN_PROXY_PASSWORD_RESULT="${password}"
+}
+
+validate_lan_proxy_upstream() {
+  local upstream="$1"
+
+  if [[ -n "${upstream}" ]]; then
+    parse_lan_proxy_upstream_url "${upstream}" >/dev/null
+  fi
+}
+
+parse_lan_proxy_upstream_url() {
+  local upstream="$1"
+  local scheme rest userinfo hostport username="" password="" host port
+
+  [[ -n "${upstream}" ]] || die "上游代理地址不能为空。"
+  [[ "${upstream}" == *"://"* ]] || die "上游代理地址必须包含协议头，例如 http:// 或 socks5://"
+
+  scheme="${upstream%%://*}"
+  rest="${upstream#*://}"
+
+  case "${scheme}" in
+    http|socks5|socks) ;;
+    *) die "暂不支持的上游代理协议：${scheme}。当前仅支持 http:// 和 socks5://。" ;;
+  esac
+
+  [[ -n "${rest}" ]] || die "上游代理地址缺少主机和端口。"
+  [[ "${rest}" != */* ]] || die "上游代理地址不能包含路径，仅支持 host:port。"
+
+  if [[ "${rest}" == *"@"* ]]; then
+    userinfo="${rest%%@*}"
+    hostport="${rest#*@}"
+    [[ "${userinfo}" == *:* ]] || die "上游代理认证必须是 username:password。"
+    username="${userinfo%%:*}"
+    password="${userinfo#*:}"
+    validate_lan_proxy_credential "${username}" "上游代理用户名"
+    validate_lan_proxy_credential "${password}" "上游代理密码"
+  else
+    hostport="${rest}"
+  fi
+
+  if [[ "${hostport}" == \[*\]:* ]]; then
+    host="${hostport%\]:*}"
+    host="${host#\[}"
+    port="${hostport##*:}"
+  else
+    [[ "${hostport}" == *:* ]] || die "上游代理地址缺少端口。"
+    host="${hostport%:*}"
+    port="${hostport##*:}"
+  fi
+
+  [[ -n "${host}" ]] || die "上游代理地址缺少主机。"
+  validate_port "${port}"
+
+  printf '%s\n' "${scheme}" "${host}" "${port}" "${username}" "${password}"
+}
+
+lan_proxy_outbound_type() {
+  local upstream_scheme="$1"
+
+  case "${upstream_scheme}" in
+    http) echo "http" ;;
+    socks5|socks) echo "socks" ;;
+    *) die "Unsupported upstream scheme: ${upstream_scheme}" ;;
+  esac
+}
+
+lan_proxy_service_description() {
+  local upstream="$1"
+
+  if [[ -n "${upstream}" ]]; then
+    echo "theLadder LAN HTTP/SOCKS relay proxy"
+  else
+    echo "theLadder LAN HTTP/SOCKS direct proxy"
+  fi
+}
+
 write_lan_proxy_config() {
   local config_file="$1"
   local port="$2"
   local listen="$3"
   local username="$4"
   local password="$5"
+  local upstream="$6"
+  local upstream_parts=()
+  local upstream_scheme=""
+  local upstream_host=""
+  local upstream_port=""
+  local upstream_username=""
+  local upstream_password=""
+  local outbound_type="direct"
+  local outbound_block='    {
+      "type": "direct",
+      "tag": "proxy-out"
+    }'
+  local line
+
+  if [[ -n "${upstream}" ]]; then
+    while IFS= read -r line; do
+      upstream_parts+=("${line}")
+    done < <(parse_lan_proxy_upstream_url "${upstream}")
+    upstream_scheme="${upstream_parts[0]}"
+    upstream_host="${upstream_parts[1]}"
+    upstream_port="${upstream_parts[2]}"
+    upstream_username="${upstream_parts[3]}"
+    upstream_password="${upstream_parts[4]}"
+    outbound_type="$(lan_proxy_outbound_type "${upstream_scheme}")"
+
+    outbound_block='    {
+      "type": "'"${outbound_type}"'",
+      "tag": "proxy-out",
+      "server": "'"${upstream_host}"'",
+      "server_port": '"${upstream_port}"
+
+    if [[ "${outbound_type}" == "socks" ]]; then
+      outbound_block+='
+      ,"version": "5"'
+    fi
+
+    if [[ -n "${upstream_username}" ]]; then
+      outbound_block+='
+      ,"username": "'"${upstream_username}"'",
+      "password": "'"${upstream_password}"'"'
+    fi
+
+    outbound_block+='
+    }'
+  fi
 
   cat >"${config_file}" <<EOF
 {
@@ -378,13 +609,10 @@ write_lan_proxy_config() {
     }
   ],
   "outbounds": [
-    {
-      "type": "direct",
-      "tag": "direct"
-    }
+${outbound_block}
   ],
   "route": {
-    "final": "direct"
+    "final": "proxy-out"
   }
 }
 EOF
@@ -396,18 +624,34 @@ write_lan_proxy_client_info() {
   local listen="$3"
   local username="$4"
   local password="$5"
-  local server url_host
+  local upstream="$6"
+  local server
+  local url_host
+  local mode_label="LAN Proxy HTTP/SOCKS Direct"
 
   server="$(lan_proxy_client_server "${listen}")"
   url_host="$(lan_proxy_url_host "${server}")"
 
+  if [[ -n "${upstream}" ]]; then
+    mode_label="LAN Proxy HTTP/SOCKS Relay"
+  fi
+
   cat >"${client_file}" <<EOF
-LAN Proxy HTTP/SOCKS Direct
+${mode_label}
 server: ${server}
 port: ${port}
 listen: ${listen}
 username: ${username}
 password: ${password}
+EOF
+
+  if [[ -n "${upstream}" ]]; then
+    cat >>"${client_file}" <<EOF
+upstream: ${upstream}
+EOF
+  fi
+
+  cat >>"${client_file}" <<EOF
 http_proxy: http://${username}:${password}@${url_host}:${port}
 https_proxy: http://${username}:${password}@${url_host}:${port}
 all_proxy: socks5://${username}:${password}@${url_host}:${port}
@@ -454,6 +698,38 @@ detect_lan_ip() {
     '
 }
 
+write_lan_proxy_user_service() {
+  local target_user="$1"
+  local binary="$2"
+  local config_file="$3"
+  local upstream="$4"
+  local user_home
+  local user_systemd_root
+  local unit_file
+
+  user_home="$(lan_proxy_user_home "${target_user}")"
+  user_systemd_root="${user_home}/.config/systemd/user"
+  unit_file="${user_systemd_root}/${LAN_PROXY_SERVICE_NAME}.service"
+
+  mkdir -p "${user_systemd_root}"
+
+  cat >"${unit_file}" <<EOF
+[Unit]
+Description=$(lan_proxy_service_description "${upstream}")
+After=network-online.target nss-lookup.target
+Wants=network-online.target
+
+[Service]
+ExecStart=${binary} run -c ${config_file}
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=default.target
+EOF
+}
+
 uninstall_lan_proxy() {
   local requested_scope=""
   local effective_scope=""
@@ -467,9 +743,9 @@ uninstall_lan_proxy() {
   fi
 
   require_root
-  stop_disable_service "theladder-lan-proxy"
+  stop_disable_service "${LAN_PROXY_SERVICE_NAME}"
   rm -f "${CONFIG_ROOT}/lan-proxy.json" "${CONFIG_ROOT}/lan-proxy-client.txt"
-  log_info "LAN proxy removed."
+  log_info "LAN proxy 已移除。"
 }
 
 uninstall_lan_proxy_user() {
@@ -477,20 +753,24 @@ uninstall_lan_proxy_user() {
   local user_home
   local user_config_root
   local user_state_root
-  local user_log_root
+  local user_systemd_root
 
   target_user="$(lan_proxy_install_target_user "user")"
   user_home="$(lan_proxy_user_home "${target_user}")"
   user_config_root="${user_home}/.config/theladder"
   user_state_root="${user_home}/.local/state/theladder"
-  user_log_root="${user_state_root}/log"
+  user_systemd_root="${user_home}/.config/systemd/user"
 
-  stop_lan_proxy_user_for_target "${target_user}" || true
+  if [[ -f "${user_systemd_root}/${LAN_PROXY_SERVICE_NAME}.service" ]]; then
+    lan_proxy_user_systemctl "${target_user}" disable --now "${LAN_PROXY_SERVICE_NAME}.service" >/dev/null 2>&1 || true
+    lan_proxy_user_systemctl "${target_user}" daemon-reload >/dev/null 2>&1 || true
+  fi
+
   rm -f \
+    "${user_systemd_root}/${LAN_PROXY_SERVICE_NAME}.service" \
     "${user_config_root}/lan-proxy.json" \
-    "${user_config_root}/lan-proxy-client.txt" \
-    "${user_state_root}/lan-proxy.pid" \
-    "${user_log_root}/lan-proxy.log"
+    "${user_config_root}/lan-proxy-client.txt"
+  rmdir "${user_state_root}" 2>/dev/null || true
   log_info "LAN proxy 用户级安装已移除。目标用户：${target_user}"
 }
 
@@ -506,7 +786,7 @@ status_lan_proxy() {
     return
   fi
 
-  systemctl --no-pager --full status theladder-lan-proxy
+  systemctl --no-pager --full status "${LAN_PROXY_SERVICE_NAME}"
 }
 
 start_lan_proxy() {
@@ -522,9 +802,9 @@ start_lan_proxy() {
   fi
 
   require_root
-  systemctl start theladder-lan-proxy
-  systemctl --no-pager --full status theladder-lan-proxy || true
-  systemctl is-active --quiet theladder-lan-proxy || die "Service theladder-lan-proxy is not active after start."
+  systemctl start "${LAN_PROXY_SERVICE_NAME}"
+  systemctl --no-pager --full status "${LAN_PROXY_SERVICE_NAME}" || true
+  systemctl is-active --quiet "${LAN_PROXY_SERVICE_NAME}" || die "Service ${LAN_PROXY_SERVICE_NAME} is not active after start."
 }
 
 start_lan_proxy_user() {
@@ -539,108 +819,29 @@ start_lan_proxy_user_for_target() {
   local user_home
   local user_bin_root
   local user_config_root
-  local user_state_root
-  local user_log_root
   local binary
   local config_file
-  local pid_file
-  local log_file
-  local port
 
   user_home="$(lan_proxy_user_home "${target_user}")"
   user_bin_root="${user_home}/.local/bin"
   user_config_root="${user_home}/.config/theladder"
-  user_state_root="${user_home}/.local/state/theladder"
-  user_log_root="${user_state_root}/log"
   binary="${user_bin_root}/sing-box"
   config_file="${user_config_root}/lan-proxy.json"
-  pid_file="${user_state_root}/lan-proxy.pid"
-  log_file="${user_log_root}/lan-proxy.log"
 
   [[ -x "${binary}" ]] || die "sing-box not found. Run: $0 install lan-proxy --user"
   [[ -f "${config_file}" ]] || die "lan-proxy config not found. Run: $0 install lan-proxy --user"
-  mkdir -p "${user_state_root}" "${user_log_root}"
 
-  if lan_proxy_user_is_running_for_target "${target_user}"; then
-    log_info "LAN proxy user-mode is already running. pid=$(cat "${pid_file}")"
+  lan_proxy_require_user_systemd "${target_user}"
+
+  if lan_proxy_user_systemctl "${target_user}" is-active --quiet "${LAN_PROXY_SERVICE_NAME}.service"; then
+    log_info "LAN proxy 用户级 systemd 服务已在运行。"
     return
   fi
 
-  port="$(lan_proxy_config_listen_port "${config_file}")"
-  [[ -n "${port}" ]] || die "Unable to read lan-proxy listen port from ${config_file}"
-  assert_lan_proxy_port_available "${port}"
-
-  local binary_q
-  local config_q
-  local log_q
-  local pid_q
-  local start_command
-
-  printf -v binary_q '%q' "${binary}"
-  printf -v config_q '%q' "${config_file}"
-  printf -v log_q '%q' "${log_file}"
-  printf -v pid_q '%q' "${pid_file}"
-  start_command="nohup ${binary_q} run -c ${config_q} >>${log_q} 2>&1 & echo \$! > ${pid_q}"
-
-  lan_proxy_run_as_target_user "${target_user}" "${user_home}" "${start_command}"
-  sleep 1
-
-  lan_proxy_user_is_running_for_target "${target_user}" || {
-    rm -f "${pid_file}"
-    die "LAN proxy user-mode failed to start. Check log: ${log_file}"
-  }
-
-  log_info "LAN proxy user-mode started. pid=$(cat "${pid_file}")"
-}
-
-lan_proxy_config_listen_port() {
-  local config_file="$1"
-
-  awk '
-    /"listen_port"[[:space:]]*:/ {
-      gsub(/[^0-9]/, "")
-      print
-      exit
-    }
-  ' "${config_file}"
-}
-
-assert_lan_proxy_port_available() {
-  local port="$1"
-  local owner=""
-
-  owner="$(lan_proxy_port_owner "${port}")"
-  if [[ -n "${owner}" ]]; then
-    die "TCP port ${port} is already in use: ${owner}. Use another port, for example: $0 install lan-proxy --user --port 18080"
-  fi
-}
-
-lan_proxy_port_owner() {
-  local port="$1"
-
-  if command_exists ss; then
-    ss -ltnp 2>/dev/null | awk -v suffix=":${port}" '
-      NR > 1 && $4 ~ suffix "$" {
-        print $0
-        exit
-      }
-    '
-    return
-  fi
-
-  if command_exists lsof; then
-    lsof -nP -iTCP:"${port}" -sTCP:LISTEN 2>/dev/null | awk 'NR == 2 { print; exit }'
-    return
-  fi
-
-  if command_exists netstat; then
-    netstat -ltnp 2>/dev/null | awk -v suffix=":${port}" '
-      NR > 2 && $4 ~ suffix "$" {
-        print $0
-        exit
-      }
-    '
-  fi
+  lan_proxy_user_systemctl "${target_user}" daemon-reload
+  lan_proxy_user_systemctl "${target_user}" enable --now "${LAN_PROXY_SERVICE_NAME}.service"
+  lan_proxy_user_systemctl "${target_user}" --no-pager --full status "${LAN_PROXY_SERVICE_NAME}.service" || true
+  lan_proxy_user_systemctl "${target_user}" is-active --quiet "${LAN_PROXY_SERVICE_NAME}.service" || die "LAN proxy 用户级 systemd 服务启动失败。"
 }
 
 stop_lan_proxy() {
@@ -656,7 +857,7 @@ stop_lan_proxy() {
   fi
 
   require_root
-  systemctl stop theladder-lan-proxy
+  systemctl stop "${LAN_PROXY_SERVICE_NAME}"
 }
 
 stop_lan_proxy_user() {
@@ -669,30 +870,18 @@ stop_lan_proxy_user() {
 stop_lan_proxy_user_for_target() {
   local target_user="$1"
   local user_home
-  local user_state_root
-  local pid_file
-  local pid
+  local unit_file
 
   user_home="$(lan_proxy_user_home "${target_user}")"
-  user_state_root="${user_home}/.local/state/theladder"
-  pid_file="${user_state_root}/lan-proxy.pid"
+  unit_file="${user_home}/.config/systemd/user/${LAN_PROXY_SERVICE_NAME}.service"
 
-  if [[ ! -f "${pid_file}" ]]; then
-    log_info "LAN proxy user-mode is not running."
+  [[ -f "${unit_file}" ]] || {
+    log_info "LAN proxy user-mode 尚未安装。"
     return
-  fi
+  }
 
-  pid="$(cat "${pid_file}")"
-  if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
-    kill "${pid}" 2>/dev/null || true
-    sleep 1
-    if kill -0 "${pid}" 2>/dev/null; then
-      kill -TERM "${pid}" 2>/dev/null || true
-    fi
-  fi
-
-  rm -f "${pid_file}"
-  log_info "LAN proxy user-mode stopped."
+  lan_proxy_require_user_systemd "${target_user}"
+  lan_proxy_user_systemctl "${target_user}" stop "${LAN_PROXY_SERVICE_NAME}.service"
 }
 
 restart_lan_proxy() {
@@ -708,64 +897,48 @@ restart_lan_proxy() {
   fi
 
   require_root
-  restart_service "theladder-lan-proxy"
+  restart_service "${LAN_PROXY_SERVICE_NAME}"
 }
 
 restart_lan_proxy_user() {
-  stop_lan_proxy_user "$@"
-  start_lan_proxy_user "$@"
+  local target_user
+
+  target_user="$(lan_proxy_install_target_user "user")"
+  restart_lan_proxy_user_for_target "${target_user}"
+}
+
+restart_lan_proxy_user_for_target() {
+  local target_user="$1"
+  local user_home
+  local user_config_root
+  local config_file
+
+  user_home="$(lan_proxy_user_home "${target_user}")"
+  user_config_root="${user_home}/.config/theladder"
+  config_file="${user_config_root}/lan-proxy.json"
+
+  [[ -f "${config_file}" ]] || die "lan-proxy config not found. Run: $0 install lan-proxy --user"
+  lan_proxy_require_user_systemd "${target_user}"
+
+  lan_proxy_user_systemctl "${target_user}" daemon-reload
+  lan_proxy_user_systemctl "${target_user}" restart "${LAN_PROXY_SERVICE_NAME}.service"
+  lan_proxy_user_systemctl "${target_user}" --no-pager --full status "${LAN_PROXY_SERVICE_NAME}.service" || true
+  lan_proxy_user_systemctl "${target_user}" is-active --quiet "${LAN_PROXY_SERVICE_NAME}.service" || die "LAN proxy 用户级 systemd 服务重启失败。"
 }
 
 status_lan_proxy_user() {
   local target_user
   local user_home
   local user_config_root
-  local user_state_root
-  local user_log_root
-  local pid_file
-  local log_file
 
   target_user="$(lan_proxy_install_target_user "user")"
   user_home="$(lan_proxy_user_home "${target_user}")"
   user_config_root="${user_home}/.config/theladder"
-  user_state_root="${user_home}/.local/state/theladder"
-  user_log_root="${user_state_root}/log"
-  pid_file="${user_state_root}/lan-proxy.pid"
-  log_file="${user_log_root}/lan-proxy.log"
 
-  if lan_proxy_user_is_running_for_target "${target_user}"; then
-    echo "LAN proxy user-mode is running. pid=$(cat "${pid_file}")"
-    echo "config: ${user_config_root}/lan-proxy.json"
-    echo "log: ${log_file}"
-  else
-    echo "LAN proxy user-mode is not running."
-    [[ -f "${log_file}" ]] && echo "log: ${log_file}"
-    return 1
-  fi
-}
-
-lan_proxy_user_is_running() {
-  local target_user
-
-  target_user="$(lan_proxy_install_target_user "user")"
-  lan_proxy_user_is_running_for_target "${target_user}"
-}
-
-lan_proxy_user_is_running_for_target() {
-  local target_user="$1"
-  local user_home
-  local user_state_root
-  local pid_file
-  local pid
-
-  user_home="$(lan_proxy_user_home "${target_user}")"
-  user_state_root="${user_home}/.local/state/theladder"
-  pid_file="${user_state_root}/lan-proxy.pid"
-
-  [[ -f "${pid_file}" ]] || return 1
-  pid="$(cat "${pid_file}")"
-  [[ -n "${pid}" ]] || return 1
-  kill -0 "${pid}" 2>/dev/null
+  lan_proxy_require_user_systemd "${target_user}"
+  echo "config: ${user_config_root}/lan-proxy.json"
+  echo "journal: journalctl --user -u ${LAN_PROXY_SERVICE_NAME}.service -n 50 --no-pager"
+  lan_proxy_user_systemctl "${target_user}" --no-pager --full status "${LAN_PROXY_SERVICE_NAME}.service"
 }
 
 show_lan_proxy() {

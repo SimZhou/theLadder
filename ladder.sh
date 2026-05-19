@@ -42,10 +42,13 @@ theLadder - Linux 代理服务一键部署脚本
 内网直通代理：
   sudo ./ladder.sh install lan-proxy [--port 7890] [--listen 0.0.0.0] [--username theladder] [--password password]
   ./ladder.sh install lan-proxy --user [--port 7890] [--listen 0.0.0.0] [--username theladder] [--password password]
+  ./ladder.sh install lan-proxy --user --upstream http://user:pass@1.2.3.4:7890 --port 17890
   ./ladder.sh start|stop|restart|status|show|uninstall lan-proxy --user
 
-  lan-proxy 会在一台能访问外网的机器上提供 HTTP/SOCKS5 混合代理。
+  lan-proxy 默认会在一台能访问外网的机器上提供 HTTP/SOCKS5 混合代理。
+  指定 `--upstream` 后，改为代理中转模式：B 机器开放 mixed 入口，再转发到上游 HTTP/SOCKS5 代理。
   `install lan-proxy` 默认做系统级安装；带 `--user` 或在非 root 下执行时，改为用户级安装。
+  `--user` 模式使用用户级 systemd 管理服务。
   内网机器只需要能访问这台机器的监听地址和端口，就可以通过代理联网。
 
 查看配置：

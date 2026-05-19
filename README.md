@@ -49,26 +49,25 @@ sudo ./ladder.sh install lan-proxy
 ./ladder.sh install lan-proxy --user
 ```
 
+安装到用户目录，并把 B 机器作为上游代理中转：
+
+```bash
+./ladder.sh install lan-proxy --user --upstream http://user:pass@1.2.3.4:7890 --port 17890
+```
+
 指定监听地址、端口和账号密码：
 
 ```bash
 sudo ./ladder.sh install lan-proxy --listen 0.0.0.0 --port 7890 --username theladder --password 'change-me'
 ```
 
-安装到当前用户目录并用后台进程运行：
-
-```bash
-./ladder.sh install lan-proxy --user
-```
-
-用户态安装不会写入 `/etc`、`/usr/local/bin` 或 systemd，文件位置为：
+用户态安装不会写入 `/etc` 或 `/usr/local/bin`，会写入当前用户目录和用户级 systemd，文件位置为：
 
 ```text
 ~/.local/bin/sing-box
 ~/.config/theladder/lan-proxy.json
 ~/.config/theladder/lan-proxy-client.txt
-~/.local/state/theladder/lan-proxy.pid
-~/.local/state/theladder/log/lan-proxy.log
+~/.config/systemd/user/theladder-lan-proxy.service
 ```
 
 重复执行安装时，如果 `~/.local/bin/sing-box` 已存在，会复用现有二进制。
@@ -102,6 +101,7 @@ sudo ./ladder.sh status best
 systemctl status theladder-xray --no-pager
 systemctl status theladder-hysteria2 --no-pager
 systemctl status theladder-lan-proxy --no-pager
+systemctl --user status theladder-lan-proxy --no-pager
 ```
 
 ## 重启
@@ -148,7 +148,37 @@ LAN Proxy: 7890/tcp
 
 `lan-proxy` 适合把一台能访问外网的机器作为内网出口。脚本会安装 sing-box，并启动一个 HTTP/SOCKS5 混合代理。默认监听 `0.0.0.0:7890`，账号为 `theladder`，密码未指定时自动生成。
 
-`install lan-proxy` 默认做系统级安装：会创建 systemd 服务并尝试放行防火墙端口。带 `--user`，或在非 root 下直接执行 `./ladder.sh install lan-proxy` 时，会改为用户级安装：只使用当前用户目录，并通过 pid 文件管理后台进程；机器重启后需要重新执行 `./ladder.sh start lan-proxy --user`。
+如果带 `--upstream`，`lan-proxy` 会进入中转模式：在本机开放一个新的 mixed 代理入口，再把流量转发到上游 `http://` 或 `socks5://` 代理。未额外指定 `--username/--password` 时，会默认复用上游地址中的账号密码作为本地对外认证。
+
+`install lan-proxy` 默认做系统级安装：会创建 systemd 服务并尝试放行防火墙端口。带 `--user`，或在非 root 下直接执行 `./ladder.sh install lan-proxy` 时，会改为用户级安装：只使用当前用户目录，并通过用户级 systemd 管理。若希望机器重启后自动拉起用户级服务，通常需要管理员提前执行 `loginctl enable-linger <user>`。
+
+以 `A` 机器已经开放 `mihomo mixed-port` 为例，如果：
+
+- `A` 的代理地址是 `http://alice:secret@10.0.0.10:7890`
+- `B` 机器需要以用户级方式开放 `17890`
+- `C` 机器只能访问 `B`，再由 `B` 转发到 `A`
+
+那么在 `B` 上执行：
+
+```bash
+./ladder.sh install lan-proxy --user \
+  --upstream http://alice:secret@10.0.0.10:7890 \
+  --port 17890
+```
+
+安装完成后查看对外地址：
+
+```bash
+./ladder.sh show lan-proxy --user
+```
+
+如果 `B` 的内网地址是 `10.0.0.20`，则 `C` 机器可以直接使用：
+
+```bash
+export http_proxy="http://alice:secret@10.0.0.20:17890"
+export https_proxy="http://alice:secret@10.0.0.20:17890"
+export all_proxy="socks5://alice:secret@10.0.0.20:17890"
+```
 
 在内网机器上临时使用：
 
@@ -164,6 +194,12 @@ export all_proxy="socks5://用户:密码@出口机内网IP:7890"
 
 ```bash
 ./ladder.sh install lan-proxy --user --port 18080
+```
+
+查看用户级日志：
+
+```bash
+journalctl --user -u theladder-lan-proxy.service -n 50 --no-pager
 ```
 
 ## 旧组件清理
