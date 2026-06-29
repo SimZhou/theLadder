@@ -28,7 +28,7 @@ This repository maintains Linux proxy deployment scripts. Keep the design simple
 
 ## Verified Defaults
 
-- Xray installs should generate `VLESS + REALITY + XTLS Vision` on TCP `443` by default, with `servername`/`dest` defaulting to `www.microsoft.com`.
+- Xray installs should generate `VLESS + REALITY + XTLS Vision` on TCP `443` by default. When no SNI is given, auto-select `servername`/`dest` from `REALITY_SNI_CANDIDATES` by live-probing each for TLS1.3 + h2. Never default to `www.microsoft.com` or other tutorial-overused SNIs: they are prime targets for SNI-directed blocking, which kills whole batches of nodes while the server, protocol, and keys stay intact. Randomize selection so multiple servers diverge in disguise domain.
 - Hysteria2 installs should be treated as a high-throughput fallback and should support a configurable UDP port. Use UDP `8443` in examples when Xray already uses TCP `443`.
 - Generated client output must include enough fields for mihomo clients: server, port, uuid/password, `flow`, `servername`/SNI, public key, short id, and obfs settings where applicable.
 - Never write private server keys, generated passwords, or real node credentials into repository docs or examples. Use placeholders in committed documentation.

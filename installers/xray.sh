@@ -1,5 +1,49 @@
 #!/usr/bin/env bash
 
+# REALITY 伪装域名候选池：均需支持 TLS1.3 + HTTP/2，且不属于被教程用滥的目标。
+# 刻意避开 www.microsoft.com 这类烂大街 SNI——它们最容易被 GFW 做定向 SNI 封锁，
+# 一旦被封，同伪装域名的节点会成片失效（即使服务器、协议、密钥都完好）。
+# 顺序即偏好：靠前的更稳。实测同一 dest 单次握手会抖动（Apple CDN 尤甚），
+# 故 select 时用重试判定，不因偶发失败误杀一个本身可用的域名。
+REALITY_SNI_CANDIDATES=(
+  "cdn.jsdelivr.net"
+  "www.apple.com"
+  "www.icloud.com"
+)
+
+# 校验候选域名当前是否可作为 REALITY dest：必须协商出 TLS1.3 且 ALPN 支持 h2。
+# 在服务器本机执行，顺带验证服务器到该 dest 的可达性（REALITY 回落要求）。
+# 单次握手存在抖动，故重试数次，任意一次达标即视为可用。
+reality_sni_is_valid() {
+  local host="$1"
+  local attempt out
+  for attempt in 1 2 3; do
+    out="$(echo | timeout 10 openssl s_client -connect "${host}:443" -servername "${host}" -alpn h2 2>/dev/null)" || continue
+    if grep -q "Protocol  : TLSv1.3" <<<"${out}" && grep -q "ALPN protocol: h2" <<<"${out}"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# 从候选池随机起点轮询，挑第一个实测可用的 SNI。
+# 随机化让多台服务器倾向选用不同伪装域名，降低被批量识别、一锅端封锁的概率。
+select_reality_sni() {
+  local count="${#REALITY_SNI_CANDIDATES[@]}"
+  local start=$((RANDOM % count))
+  local i idx host
+  for ((i = 0; i < count; i++)); do
+    idx=$(((start + i) % count))
+    host="${REALITY_SNI_CANDIDATES[idx]}"
+    if reality_sni_is_valid "${host}"; then
+      echo "${host}"
+      return 0
+    fi
+  done
+  # 全部探测失败（如服务器临时无法访问候选站点）时回退首项，不阻断安装。
+  echo "${REALITY_SNI_CANDIDATES[0]}"
+}
+
 install_xray() {
   require_root
   ensure_layout
@@ -8,10 +52,17 @@ install_xray() {
   detect_arch
 
   local port="${1:-443}"
-  local sni="${2:-www.microsoft.com}"
-  local dest="${3:-${sni}:443}"
+  local sni="${2:-}"
+  local dest="${3:-}"
   local tag archive url tmp_dir xray_asset_arch
   local uuid key_output private_key public_key short_id server_ip link
+
+  # 未显式指定 SNI 时自动优选；dest 默认跟随 SNI（同域名回落最自然）。
+  if [[ -z "${sni}" ]]; then
+    sni="$(select_reality_sni)"
+    log_info "Auto-selected REALITY SNI: ${sni}"
+  fi
+  [[ -n "${dest}" ]] || dest="${sni}:443"
 
   case "${ARCH}" in
     amd64) xray_asset_arch="64" ;;

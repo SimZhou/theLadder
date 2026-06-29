@@ -25,11 +25,16 @@ git pull
 sudo ./ladder.sh install best
 ```
 
-仅安装 Xray 组件：
+仅安装 Xray 组件（省略 SNI 时自动从候选池实测优选）：
 
 ```bash
-sudo ./ladder.sh install xray 443 www.microsoft.com
+sudo ./ladder.sh install xray
+sudo ./ladder.sh install xray 443 www.apple.com   # 也可显式指定伪装域名
 ```
+
+> REALITY 伪装域名（SNI）不要用 `www.microsoft.com` 这类被教程用滥的目标。
+> 它们最易被定向 SNI 封锁，会导致服务器、协议、密钥都完好却整片节点连不上。
+> 不指定 SNI 时脚本会自动优选；多台服务器倾向选用不同域名，以抵抗批量封锁。
 
 仅安装 Hysteria2 组件：
 

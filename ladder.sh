@@ -68,7 +68,7 @@ theLadder - Linux 代理服务一键部署脚本
   Xray 端口：443/tcp
   Hysteria2 端口：443/udp
   LAN Proxy 端口：7890/tcp
-  REALITY SNI：www.microsoft.com
+  REALITY SNI：自动优选（不指定时从内置候选池实测挑选，多台服务器倾向不同域名以抗批量封锁）
 
 协议选择建议：
   优先使用 Xray VLESS REALITY Vision，通常最稳。
@@ -93,12 +93,17 @@ validate_port() {
 install_best() {
   local xray_port="${1:-443}"
   local hysteria_port="${2:-443}"
-  local sni="${3:-www.microsoft.com}"
+  local sni="${3:-}"
 
   validate_port "${xray_port}"
   validate_port "${hysteria_port}"
 
-  install_xray "${xray_port}" "${sni}" "${sni}:443"
+  # sni 留空时由 install_xray 自动优选；显式传入则透传并以同域名作为 dest。
+  if [[ -n "${sni}" ]]; then
+    install_xray "${xray_port}" "${sni}" "${sni}:443"
+  else
+    install_xray "${xray_port}"
+  fi
   install_hysteria2 "${hysteria_port}"
 }
 
